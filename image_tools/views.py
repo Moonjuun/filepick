@@ -87,3 +87,36 @@ def convert_image_format(request):
         })
 
     return JsonResponse({'error': 'Invalid request'}, status=400)
+
+@csrf_exempt
+def compress_image(request):
+    if request.method == 'POST' and request.FILES.get('image'):
+        img_file = request.FILES['image']
+        quality_level = request.POST.get('quality', 'medium').lower()
+
+        quality_map = {
+            'high': 85,
+            'medium': 65,
+            'low': 40
+        }
+        quality = quality_map.get(quality_level, 65)
+
+        # 저장 경로
+        original_path = default_storage.save('original/' + img_file.name, img_file)
+        full_input_path = os.path.join(settings.MEDIA_ROOT, original_path)
+
+        # 열기 + 압축 저장
+        img = Image.open(full_input_path).convert("RGB")
+        filename_wo_ext = os.path.splitext(img_file.name)[0]
+        compressed_filename = f"{filename_wo_ext}_compressed.jpg"
+        compressed_path = f"compressed/{compressed_filename}"
+        full_output_path = os.path.join(settings.MEDIA_ROOT, compressed_path)
+        os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
+
+        img.save(full_output_path, "JPEG", quality=quality)
+
+        return JsonResponse({
+            'compressed_url': settings.MEDIA_URL + compressed_path
+        })
+
+    return JsonResponse({'error': 'Invalid request'}, status=400)
