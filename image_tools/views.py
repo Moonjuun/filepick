@@ -269,7 +269,6 @@ def apply_filter(request):
 )
 @api_view(['POST'])
 @parser_classes([MultiPartParser])
-@csrf_exempt
 def add_watermark(request):
     if request.method == 'POST' and request.FILES.getlist('images'):
         images = request.FILES.getlist('images')
@@ -280,68 +279,65 @@ def add_watermark(request):
 
         watermark_urls = []
 
-        # 이미지 워터마크 파일 (옵션)
-        wm_img_file = request.FILES.get('watermark_image')
+        # 이미지 워터마크 준비
         wm_img = None
-        if wm_type == 'image' and wm_img_file:
-            wm_path = default_storage.save('wm/' + wm_img_file.name, wm_img_file)
-            wm_full_path = os.path.join(settings.MEDIA_ROOT, wm_path)
-            wm_img = Image.open(wm_full_path).convert("RGBA")
+        if wm_type == 'image' and request.FILES.get('watermark_image'):
+            wm_path = default_storage.save('wm/' + request.FILES['watermark_image'].name, request.FILES['watermark_image'])
+            wm_img = Image.open(os.path.join(settings.MEDIA_ROOT, wm_path)).convert("RGBA")
 
         for img_file in images:
-            original_path = default_storage.save('original/' + img_file.name, img_file)
-            full_input_path = os.path.join(settings.MEDIA_ROOT, original_path)
-
             try:
+                original_path = default_storage.save('original/' + img_file.name, img_file)
+                full_input_path = os.path.join(settings.MEDIA_ROOT, original_path)
                 base_img = Image.open(full_input_path).convert("RGBA")
-            except Exception:
-                continue  # 이미지 열기 실패시 건너뜀
 
-            watermark = Image.new("RGBA", base_img.size, (0, 0, 0, 0))
+                watermark = Image.new("RGBA", base_img.size, (0, 0, 0, 0))
 
-            if wm_type == 'text':
-                draw = ImageDraw.Draw(watermark)
-                font_path = "/System/Library/Fonts/Supplemental/Arial.ttf"  # macOS 기준
-                font_size = int(min(base_img.size) * 0.05)
-                try:
-                    font = ImageFont.truetype(font_path, font_size)
-                except:
-                    font = ImageFont.load_default()
+                if wm_type == 'text':
+                    draw = ImageDraw.Draw(watermark)
+                    font_size = int(min(base_img.size) * 0.05)
+                    try:
+                        font_path = "/Library/Fonts/Arial.ttf"  # macOS 기준
+                        font = ImageFont.truetype(font_path, font_size)
+                    except:
+                        font = ImageFont.load_default()
+                        font_size = 30  # 기본 폰트 보정
 
-                bbox = draw.textbbox((0, 0), text, font=font)
-                text_width = bbox[2] - bbox[0]
-                text_height = bbox[3] - bbox[1]
-                text_size = (text_width, text_height)
-                x, y = get_position(position, base_img.size, text_size)
-                draw.text((x, y), text, fill=(255, 255, 255, opacity), font=font)
+                    bbox = draw.textbbox((0, 0), text, font=font)
+                    text_width = bbox[2] - bbox[0]
+                    text_height = bbox[3] - bbox[1]
+                    text_size = (text_width, text_height)
+                    x, y = get_position(position, base_img.size, text_size)
 
-            elif wm_type == 'image' and wm_img:
-                wm_resized = wm_img.resize((int(base_img.size[0] * 0.25), int(base_img.size[1] * 0.25)))
-                if opacity < 255:
-                    alpha = wm_resized.getchannel('A')
-                    alpha = alpha.point(lambda p: int(p * (opacity / 255)))
-                    wm_resized.putalpha(alpha)
+                    draw.text((x, y), text, fill=(0, 0, 0, opacity), font=font)
 
-                x, y = get_position(position, base_img.size, wm_resized.size)
-                watermark.paste(wm_resized, (x, y), wm_resized)
+                elif wm_type == 'image' and wm_img:
+                    wm_resized = wm_img.resize((int(base_img.size[0] * 0.25), int(base_img.size[1] * 0.25)))
+                    if opacity < 255:
+                        alpha = wm_resized.getchannel('A')
+                        new_alpha = alpha.point(lambda p: int(p * (opacity / 255)))
+                        wm_resized.putalpha(new_alpha)
+                    else:
+                        wm_resized.putalpha(255)
 
-            else:
-                continue  # 워터마크 옵션 이상한 경우 skip
+                    x, y = get_position(position, base_img.size, wm_resized.size)
+                    watermark.paste(wm_resized, (x, y), wm_resized)
 
-            combined = Image.alpha_composite(base_img, watermark).convert("RGB")
+                combined = Image.alpha_composite(base_img, watermark).convert("RGB")
 
-            filename_wo_ext = os.path.splitext(img_file.name)[0]
-            output_filename = f"{filename_wo_ext}_watermarked.jpg"
-            output_path = f"watermarked/{output_filename}"
-            full_output_path = os.path.join(settings.MEDIA_ROOT, output_path)
-            os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
-            combined.save(full_output_path, "JPEG")
+                filename_wo_ext = os.path.splitext(img_file.name)[0]
+                output_filename = f"{filename_wo_ext}_watermarked.jpg"
+                output_path = f"watermarked/{output_filename}"
+                full_output_path = os.path.join(settings.MEDIA_ROOT, output_path)
+                os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
+                combined.save(full_output_path, "JPEG")
 
-            watermark_urls.append(settings.MEDIA_URL + output_path)
+                watermark_urls.append(settings.MEDIA_URL + output_path)
 
-        return JsonResponse({
-            'watermarked_urls': watermark_urls
-        })
+            except Exception as e:
+                continue
+
+        return JsonResponse({'watermarked_urls': watermark_urls})
 
     return JsonResponse({'error': 'Invalid request'}, status=400)
 
@@ -356,9 +352,9 @@ def get_position(position, base_size, wm_size):
         return (bx - wx - 10, 10)
     elif position == 'bottom-left':
         return (10, by - wy - 10)
-    elif position == 'bottom-right':
-        return (bx - wx - 10, by - wy - 10)
     elif position == 'center':
         return ((bx - wx) // 2, (by - wy) // 2)
+    elif position == 'bottom-right':
+        return (bx - wx - 10, by - wy - 10)
     else:
-        return (bx - wx - 10, by - wy - 10)  # 기본값: bottom-right
+        return (10, 10)
