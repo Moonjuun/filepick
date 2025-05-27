@@ -21,7 +21,7 @@ schema_view = get_schema_view(
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/image/', include('image_tools.urls')),
+    path('api/image/', include('tools.image_tools.urls')),
 
     # ✅ Swagger / ReDoc 경로 추가
     re_path(r'^swagger(?P<format>\.json|\.yaml)$',
