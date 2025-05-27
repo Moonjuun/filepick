@@ -7,27 +7,27 @@ import os
 
 @csrf_exempt
 def resize_image(request):
-    if request.method == 'POST' and request.FILES.get('image'):
-        img_file = request.FILES['image']
-        width = int(request.POST.get('width', 300))  # 기본 300px
+    if request.method == 'POST' and request.FILES.getlist('images'):
+        width = int(request.POST.get('width', 300))
         height = int(request.POST.get('height', 300))
+        images = request.FILES.getlist('images')
 
-        # 원본 저장
-        path = default_storage.save('original/' + img_file.name, img_file)
+        resized_urls = []
 
-        # Pillow로 열기 + 리사이즈
-        img = Image.open(os.path.join(settings.MEDIA_ROOT, path))
-        resized_img = img.resize((width, height))
-        
-        # 저장할 경로
-        resized_path = 'resized/resized_' + img_file.name
-        full_resized_path = os.path.join(settings.MEDIA_ROOT, resized_path)
-        os.makedirs(os.path.dirname(full_resized_path), exist_ok=True)
-        resized_img.save(full_resized_path)
+        for img_file in images:
+            path = default_storage.save('original/' + img_file.name, img_file)
+            img = Image.open(os.path.join(settings.MEDIA_ROOT, path))
+            resized_img = img.resize((width, height))
 
-        # URL로 반환
+            resized_path = 'resized/resized_' + img_file.name
+            full_resized_path = os.path.join(settings.MEDIA_ROOT, resized_path)
+            os.makedirs(os.path.dirname(full_resized_path), exist_ok=True)
+            resized_img.save(full_resized_path)
+
+            resized_urls.append(settings.MEDIA_URL + resized_path)
+
         return JsonResponse({
-            'resized_url': settings.MEDIA_URL + resized_path
+            'resized_urls': resized_urls
         })
 
     return JsonResponse({'error': 'Invalid request'}, status=400)
@@ -45,61 +45,65 @@ SUPPORTED_FORMATS = {
 
 @csrf_exempt
 def convert_image_format(request):
-    if request.method == 'POST' and request.FILES.get('file'):
-        uploaded_file = request.FILES['file']
+    if request.method == 'POST' and request.FILES.getlist('images'):
+        images = request.FILES.getlist('images')
         target_format = request.POST.get('format', 'PNG').upper()
 
         if target_format not in SUPPORTED_FORMATS:
             return JsonResponse({'error': 'Unsupported format'}, status=400)
 
         ext = SUPPORTED_FORMATS[target_format]
-        original_path = default_storage.save('original/' + uploaded_file.name, uploaded_file)
-        full_input_path = os.path.join(settings.MEDIA_ROOT, original_path)
+        converted_urls = []
 
-        # 입력이 PDF인 경우 → 이미지로 변환
-        if uploaded_file.name.lower().endswith('.pdf') and target_format != 'PDF':
-            output_dir = os.path.join(settings.MEDIA_ROOT, 'converted')
-            os.makedirs(output_dir, exist_ok=True)
+        for uploaded_file in images:
+            original_path = default_storage.save('original/' + uploaded_file.name, uploaded_file)
+            full_input_path = os.path.join(settings.MEDIA_ROOT, original_path)
 
-            images = convert_from_path(full_input_path)
-            urls = []
-            for i, page in enumerate(images):
-                converted_filename = f"{os.path.splitext(uploaded_file.name)[0]}_page_{i+1}.{target_format.lower()}"
-                output_path = os.path.join(output_dir, converted_filename)
-                page.convert("RGB").save(output_path, ext)
-                urls.append(settings.MEDIA_URL + 'converted/' + converted_filename)
+            # PDF → 이미지로 변환
+            if uploaded_file.name.lower().endswith('.pdf') and target_format != 'PDF':
+                from pdf2image import convert_from_path
+                output_dir = os.path.join(settings.MEDIA_ROOT, 'converted')
+                os.makedirs(output_dir, exist_ok=True)
 
-            return JsonResponse({'converted_urls': urls})
+                try:
+                    pages = convert_from_path(full_input_path)
+                except Exception:
+                    continue  # PDF 변환 실패 시 skip
 
-        # 일반 이미지 → 다른 포맷 (or PDF) 변환
-        img = Image.open(full_input_path)
-        filename_wo_ext = os.path.splitext(uploaded_file.name)[0]
-        converted_filename = f"{filename_wo_ext}.{target_format.lower()}"
-        converted_path = f"converted/{converted_filename}"
-        full_output_path = os.path.join(settings.MEDIA_ROOT, converted_path)
+                for i, page in enumerate(pages):
+                    converted_filename = f"{os.path.splitext(uploaded_file.name)[0]}_page_{i+1}.{target_format.lower()}"
+                    output_path = os.path.join(output_dir, converted_filename)
+                    page.convert("RGB").save(output_path, ext)
+                    converted_urls.append(settings.MEDIA_URL + 'converted/' + converted_filename)
 
-        os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
-        img.convert("RGB").save(full_output_path, ext)
+            else:
+                try:
+                    img = Image.open(full_input_path)
+                    filename_wo_ext = os.path.splitext(uploaded_file.name)[0]
+                    converted_filename = f"{filename_wo_ext}.{target_format.lower()}"
+                    converted_path = f"converted/{converted_filename}"
+                    full_output_path = os.path.join(settings.MEDIA_ROOT, converted_path)
+
+                    os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
+                    img.convert("RGB").save(full_output_path, ext)
+                    converted_urls.append(settings.MEDIA_URL + converted_path)
+                except Exception:
+                    continue  # 이미지 변환 실패 시 skip
 
         return JsonResponse({
-            'converted_url': settings.MEDIA_URL + converted_path
+            'converted_urls': converted_urls
         })
 
     return JsonResponse({'error': 'Invalid request'}, status=400)
 
 @csrf_exempt
 def compress_image(request):
-    if request.method == 'POST' and request.FILES.get('image'):
-        img_file = request.FILES['image']
+    if request.method == 'POST' and request.FILES.getlist('images'):
+        images = request.FILES.getlist('images')
         quality_level = request.POST.get('quality', 'medium').lower()
 
-        # 허용된 확장자 목록 (이미지 파일만 허용)
+        # 허용된 확장자
         allowed_extensions = ['.jpg', '.jpeg', '.png', '.webp']
-        ext = os.path.splitext(img_file.name)[1].lower()
-
-        if ext not in allowed_extensions:
-            return JsonResponse({'error': 'Only image files can be compressed.'}, status=400)
-
         quality_map = {
             'high': 85,
             'medium': 65,
@@ -107,146 +111,167 @@ def compress_image(request):
         }
         quality = quality_map.get(quality_level, 65)
 
-        # 저장 경로
-        original_path = default_storage.save('original/' + img_file.name, img_file)
-        full_input_path = os.path.join(settings.MEDIA_ROOT, original_path)
+        compressed_urls = []
 
-        # 열기 + 압축 저장
-        img = Image.open(full_input_path).convert("RGB")
-        filename_wo_ext = os.path.splitext(img_file.name)[0]
-        compressed_filename = f"{filename_wo_ext}_compressed.jpg"
-        compressed_path = f"compressed/{compressed_filename}"
-        full_output_path = os.path.join(settings.MEDIA_ROOT, compressed_path)
-        os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
+        for img_file in images:
+            ext = os.path.splitext(img_file.name)[1].lower()
+            if ext not in allowed_extensions:
+                continue  # 지원되지 않는 확장자는 skip
 
-        img.save(full_output_path, "JPEG", quality=quality)
+            original_path = default_storage.save('original/' + img_file.name, img_file)
+            full_input_path = os.path.join(settings.MEDIA_ROOT, original_path)
+
+            try:
+                img = Image.open(full_input_path).convert("RGB")
+                filename_wo_ext = os.path.splitext(img_file.name)[0]
+                compressed_filename = f"{filename_wo_ext}_compressed.jpg"
+                compressed_path = f"compressed/{compressed_filename}"
+                full_output_path = os.path.join(settings.MEDIA_ROOT, compressed_path)
+
+                os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
+                img.save(full_output_path, "JPEG", quality=quality)
+
+                compressed_urls.append(settings.MEDIA_URL + compressed_path)
+            except Exception:
+                continue  # 오류 발생 시 해당 파일 건너뜀
 
         return JsonResponse({
-            'compressed_url': settings.MEDIA_URL + compressed_path
+            'compressed_urls': compressed_urls
         })
 
     return JsonResponse({'error': 'Invalid request'}, status=400)
 
+
 @csrf_exempt
 def apply_filter(request):
-    if request.method == 'POST' and request.FILES.get('image'):
-        img_file = request.FILES['image']
+    if request.method == 'POST' and request.FILES.getlist('images'):
+        images = request.FILES.getlist('images')
         filter_name = request.POST.get('filter', 'grayscale').lower()
 
-        original_path = default_storage.save('original/' + img_file.name, img_file)
-        full_input_path = os.path.join(settings.MEDIA_ROOT, original_path)
+        filtered_urls = []
 
-        try:
-            img = Image.open(full_input_path).convert("RGB")
-        except Exception:
-            return JsonResponse({'error': 'Unsupported image file.'}, status=400)
+        for img_file in images:
+            original_path = default_storage.save('original/' + img_file.name, img_file)
+            full_input_path = os.path.join(settings.MEDIA_ROOT, original_path)
 
-        if filter_name == 'grayscale':
-            img = img.convert('L').convert('RGB')
+            try:
+                img = Image.open(full_input_path).convert("RGB")
+            except Exception:
+                continue  # 이미지 열기 실패시 skip
 
-        elif filter_name == 'sepia':
-            width, height = img.size
-            pixels = img.load()
-            for y in range(height):
-                for x in range(width):
-                    r, g, b = pixels[x, y]
-                    tr = int(0.393 * r + 0.769 * g + 0.189 * b)
-                    tg = int(0.349 * r + 0.686 * g + 0.168 * b)
-                    tb = int(0.272 * r + 0.534 * g + 0.131 * b)
-                    pixels[x, y] = (min(tr, 255), min(tg, 255), min(tb, 255))
+            # 필터 적용
+            if filter_name == 'grayscale':
+                img = img.convert('L').convert('RGB')
+            elif filter_name == 'sepia':
+                width, height = img.size
+                pixels = img.load()
+                for y in range(height):
+                    for x in range(width):
+                        r, g, b = pixels[x, y]
+                        tr = int(0.393 * r + 0.769 * g + 0.189 * b)
+                        tg = int(0.349 * r + 0.686 * g + 0.168 * b)
+                        tb = int(0.272 * r + 0.534 * g + 0.131 * b)
+                        pixels[x, y] = (min(tr, 255), min(tg, 255), min(tb, 255))
+            elif filter_name == 'sharpen':
+                img = img.filter(ImageFilter.SHARPEN)
+            elif filter_name == 'blur':
+                img = img.filter(ImageFilter.BLUR)
+            elif filter_name == 'contrast':
+                img = ImageEnhance.Contrast(img).enhance(1.5)
+            elif filter_name == 'brightness':
+                img = ImageEnhance.Brightness(img).enhance(1.3)
+            elif filter_name == 'edge':
+                img = img.filter(ImageFilter.FIND_EDGES)
+            else:
+                continue  # 지원하지 않는 필터는 skip
 
-        elif filter_name == 'sharpen':
-            img = img.filter(ImageFilter.SHARPEN)
+            # 저장
+            filename_wo_ext = os.path.splitext(img_file.name)[0]
+            filtered_filename = f"{filename_wo_ext}_{filter_name}.jpg"
+            filtered_path = f"filtered/{filtered_filename}"
+            full_output_path = os.path.join(settings.MEDIA_ROOT, filtered_path)
 
-        elif filter_name == 'blur':
-            img = img.filter(ImageFilter.BLUR)
+            os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
+            img.save(full_output_path, "JPEG")
 
-        elif filter_name == 'contrast':
-            enhancer = ImageEnhance.Contrast(img)
-            img = enhancer.enhance(1.5)  # 1.0 = 원본
-
-        elif filter_name == 'brightness':
-            enhancer = ImageEnhance.Brightness(img)
-            img = enhancer.enhance(1.3)  # 1.0 = 원본
-
-        elif filter_name == 'edge':
-            img = img.filter(ImageFilter.FIND_EDGES)
-
-        else:
-            return JsonResponse({'error': 'Unsupported filter type'}, status=400)
-
-        # 저장
-        filename_wo_ext = os.path.splitext(img_file.name)[0]
-        filtered_filename = f"{filename_wo_ext}_{filter_name}.jpg"
-        filtered_path = f"filtered/{filtered_filename}"
-        full_output_path = os.path.join(settings.MEDIA_ROOT, filtered_path)
-        os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
-
-        img.save(full_output_path, "JPEG")
+            filtered_urls.append(settings.MEDIA_URL + filtered_path)
 
         return JsonResponse({
-            'filtered_url': settings.MEDIA_URL + filtered_path
+            'filtered_urls': filtered_urls
         })
 
     return JsonResponse({'error': 'Invalid request'}, status=400)
 
 @csrf_exempt
 def add_watermark(request):
-    if request.method == 'POST' and request.FILES.get('image'):
-        img_file = request.FILES['image']
-        wm_type = request.POST.get('type', 'text')  # 'text' or 'image'
+    if request.method == 'POST' and request.FILES.getlist('images'):
+        images = request.FILES.getlist('images')
+        wm_type = request.POST.get('type', 'text')
         text = request.POST.get('text', 'FilePick')
         opacity = int(request.POST.get('opacity', 128))
         position = request.POST.get('position', 'bottom-right')
 
-        original_path = default_storage.save('original/' + img_file.name, img_file)
-        full_input_path = os.path.join(settings.MEDIA_ROOT, original_path)
+        watermark_urls = []
 
-        try:
-            base_img = Image.open(full_input_path).convert("RGBA")
-        except Exception:
-            return JsonResponse({'error': 'Invalid image'}, status=400)
-
-        watermark = Image.new("RGBA", base_img.size, (0, 0, 0, 0))
-
-        if wm_type == 'text':
-            draw = ImageDraw.Draw(watermark)
-            font_path = "/System/Library/Fonts/Supplemental/Arial.ttf"  # macOS 기준
-            font_size = int(min(base_img.size) * 0.05)
-            try:
-                font = ImageFont.truetype(font_path, font_size)
-            except:
-                font = ImageFont.load_default()
-
-            text_size = draw.textsize(text, font)
-            x, y = get_position(position, base_img.size, text_size)
-            draw.text((x, y), text, fill=(255, 255, 255, opacity), font=font)
-
-        elif wm_type == 'image' and request.FILES.get('watermark_image'):
-            wm_img_file = request.FILES['watermark_image']
+        # 이미지 워터마크 파일 (옵션)
+        wm_img_file = request.FILES.get('watermark_image')
+        wm_img = None
+        if wm_type == 'image' and wm_img_file:
             wm_path = default_storage.save('wm/' + wm_img_file.name, wm_img_file)
             wm_full_path = os.path.join(settings.MEDIA_ROOT, wm_path)
-
             wm_img = Image.open(wm_full_path).convert("RGBA")
-            wm_img = wm_img.resize((int(base_img.size[0] * 0.25), int(base_img.size[1] * 0.25)))
-            if opacity < 255:
-                wm_img = wm_img.putalpha(opacity)
 
-            x, y = get_position(position, base_img.size, wm_img.size)
-            watermark.paste(wm_img, (x, y), wm_img)
-        else:
-            return JsonResponse({'error': 'Invalid watermark type or image'}, status=400)
+        for img_file in images:
+            original_path = default_storage.save('original/' + img_file.name, img_file)
+            full_input_path = os.path.join(settings.MEDIA_ROOT, original_path)
 
-        combined = Image.alpha_composite(base_img, watermark).convert("RGB")
+            try:
+                base_img = Image.open(full_input_path).convert("RGBA")
+            except Exception:
+                continue  # 이미지 열기 실패시 건너뜀
 
-        filename_wo_ext = os.path.splitext(img_file.name)[0]
-        output_filename = f"{filename_wo_ext}_watermarked.jpg"
-        output_path = f"watermarked/{output_filename}"
-        full_output_path = os.path.join(settings.MEDIA_ROOT, output_path)
-        os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
-        combined.save(full_output_path, "JPEG")
+            watermark = Image.new("RGBA", base_img.size, (0, 0, 0, 0))
 
-        return JsonResponse({'watermarked_url': settings.MEDIA_URL + output_path})
+            if wm_type == 'text':
+                draw = ImageDraw.Draw(watermark)
+                font_path = "/System/Library/Fonts/Supplemental/Arial.ttf"  # macOS 기준
+                font_size = int(min(base_img.size) * 0.05)
+                try:
+                    font = ImageFont.truetype(font_path, font_size)
+                except:
+                    font = ImageFont.load_default()
+
+                text_size = draw.textsize(text, font)
+                x, y = get_position(position, base_img.size, text_size)
+                draw.text((x, y), text, fill=(255, 255, 255, opacity), font=font)
+
+            elif wm_type == 'image' and wm_img:
+                wm_resized = wm_img.resize((int(base_img.size[0] * 0.25), int(base_img.size[1] * 0.25)))
+                if opacity < 255:
+                    alpha = wm_resized.getchannel('A')
+                    alpha = alpha.point(lambda p: int(p * (opacity / 255)))
+                    wm_resized.putalpha(alpha)
+
+                x, y = get_position(position, base_img.size, wm_resized.size)
+                watermark.paste(wm_resized, (x, y), wm_resized)
+
+            else:
+                continue  # 워터마크 옵션 이상한 경우 skip
+
+            combined = Image.alpha_composite(base_img, watermark).convert("RGB")
+
+            filename_wo_ext = os.path.splitext(img_file.name)[0]
+            output_filename = f"{filename_wo_ext}_watermarked.jpg"
+            output_path = f"watermarked/{output_filename}"
+            full_output_path = os.path.join(settings.MEDIA_ROOT, output_path)
+            os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
+            combined.save(full_output_path, "JPEG")
+
+            watermark_urls.append(settings.MEDIA_URL + output_path)
+
+        return JsonResponse({
+            'watermarked_urls': watermark_urls
+        })
 
     return JsonResponse({'error': 'Invalid request'}, status=400)
 
