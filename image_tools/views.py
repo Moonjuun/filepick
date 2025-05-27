@@ -94,6 +94,13 @@ def compress_image(request):
         img_file = request.FILES['image']
         quality_level = request.POST.get('quality', 'medium').lower()
 
+        # 허용된 확장자 목록 (이미지 파일만 허용)
+        allowed_extensions = ['.jpg', '.jpeg', '.png', '.webp']
+        ext = os.path.splitext(img_file.name)[1].lower()
+
+        if ext not in allowed_extensions:
+            return JsonResponse({'error': 'Only image files can be compressed.'}, status=400)
+
         quality_map = {
             'high': 85,
             'medium': 65,
