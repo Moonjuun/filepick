@@ -1,0 +1,43 @@
+# ▶ Python 기본
+__pycache__/
+*.py[cod]
+*.egg
+*.egg-info/
+dist/
+build/
+*.log
+
+# ▶ 가상환경
+venv/
+.env/
+.env.*
+
+# ▶ Django
+db.sqlite3
+media/
+staticfiles/
+*.sqlite3
+*.pot
+*.pyc
+
+# ▶ VSCode
+.vscode/
+
+# ▶ macOS
+.DS_Store
+
+# ▶ IDEs
+.idea/
+*.iml
+
+# ▶ PyCharm
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+*.sublime-project
+*.sublime-workspace
+
+# ▶ Migrations (원할 경우)
+**/migrations/*.py
+!**/migrations/__init__.py
