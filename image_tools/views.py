@@ -189,3 +189,81 @@ def apply_filter(request):
         })
 
     return JsonResponse({'error': 'Invalid request'}, status=400)
+
+@csrf_exempt
+def add_watermark(request):
+    if request.method == 'POST' and request.FILES.get('image'):
+        img_file = request.FILES['image']
+        wm_type = request.POST.get('type', 'text')  # 'text' or 'image'
+        text = request.POST.get('text', 'FilePick')
+        opacity = int(request.POST.get('opacity', 128))
+        position = request.POST.get('position', 'bottom-right')
+
+        original_path = default_storage.save('original/' + img_file.name, img_file)
+        full_input_path = os.path.join(settings.MEDIA_ROOT, original_path)
+
+        try:
+            base_img = Image.open(full_input_path).convert("RGBA")
+        except Exception:
+            return JsonResponse({'error': 'Invalid image'}, status=400)
+
+        watermark = Image.new("RGBA", base_img.size, (0, 0, 0, 0))
+
+        if wm_type == 'text':
+            draw = ImageDraw.Draw(watermark)
+            font_path = "/System/Library/Fonts/Supplemental/Arial.ttf"  # macOS 기준
+            font_size = int(min(base_img.size) * 0.05)
+            try:
+                font = ImageFont.truetype(font_path, font_size)
+            except:
+                font = ImageFont.load_default()
+
+            text_size = draw.textsize(text, font)
+            x, y = get_position(position, base_img.size, text_size)
+            draw.text((x, y), text, fill=(255, 255, 255, opacity), font=font)
+
+        elif wm_type == 'image' and request.FILES.get('watermark_image'):
+            wm_img_file = request.FILES['watermark_image']
+            wm_path = default_storage.save('wm/' + wm_img_file.name, wm_img_file)
+            wm_full_path = os.path.join(settings.MEDIA_ROOT, wm_path)
+
+            wm_img = Image.open(wm_full_path).convert("RGBA")
+            wm_img = wm_img.resize((int(base_img.size[0] * 0.25), int(base_img.size[1] * 0.25)))
+            if opacity < 255:
+                wm_img = wm_img.putalpha(opacity)
+
+            x, y = get_position(position, base_img.size, wm_img.size)
+            watermark.paste(wm_img, (x, y), wm_img)
+        else:
+            return JsonResponse({'error': 'Invalid watermark type or image'}, status=400)
+
+        combined = Image.alpha_composite(base_img, watermark).convert("RGB")
+
+        filename_wo_ext = os.path.splitext(img_file.name)[0]
+        output_filename = f"{filename_wo_ext}_watermarked.jpg"
+        output_path = f"watermarked/{output_filename}"
+        full_output_path = os.path.join(settings.MEDIA_ROOT, output_path)
+        os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
+        combined.save(full_output_path, "JPEG")
+
+        return JsonResponse({'watermarked_url': settings.MEDIA_URL + output_path})
+
+    return JsonResponse({'error': 'Invalid request'}, status=400)
+
+
+def get_position(position, base_size, wm_size):
+    bx, by = base_size
+    wx, wy = wm_size
+
+    if position == 'top-left':
+        return (10, 10)
+    elif position == 'top-right':
+        return (bx - wx - 10, 10)
+    elif position == 'bottom-left':
+        return (10, by - wy - 10)
+    elif position == 'bottom-right':
+        return (bx - wx - 10, by - wy - 10)
+    elif position == 'center':
+        return ((bx - wx) // 2, (by - wy) // 2)
+    else:
+        return (bx - wx - 10, by - wy - 10)  # 기본값: bottom-right
