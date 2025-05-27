@@ -1,10 +1,33 @@
+import os
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
-from PIL import Image, ImageFilter, ImageEnhance
+from PIL import Image, ImageFilter, ImageEnhance, ImageDraw, ImageFont
 from django.core.files.storage import default_storage
 from django.conf import settings
-import os
+from rest_framework.decorators import api_view, parser_classes
+from rest_framework.parsers import MultiPartParser
+from rest_framework.response import Response
+from drf_yasg.utils import swagger_auto_schema
+from drf_yasg import openapi
 
+# 1. Resize
+@swagger_auto_schema(
+    method='post',
+    manual_parameters=[
+        openapi.Parameter(
+            name='images',
+            in_=openapi.IN_FORM,
+            type=openapi.TYPE_FILE,
+            description='여러 이미지 파일',
+            required=True,
+            multiple=True 
+        ),
+        openapi.Parameter('width', openapi.IN_FORM, type=openapi.TYPE_INTEGER, description='가로', required=True),
+        openapi.Parameter('height', openapi.IN_FORM, type=openapi.TYPE_INTEGER, description='세로', required=True),
+    ]
+)
+@api_view(['POST'])
+@parser_classes([MultiPartParser])
 @csrf_exempt
 def resize_image(request):
     if request.method == 'POST' and request.FILES.getlist('images'):
@@ -33,6 +56,7 @@ def resize_image(request):
     return JsonResponse({'error': 'Invalid request'}, status=400)
 
 
+
 SUPPORTED_FORMATS = {
     'JPG': 'JPEG',
     'PNG': 'PNG',
@@ -43,6 +67,16 @@ SUPPORTED_FORMATS = {
     'PDF': 'PDF',
 }
 
+# 2. Compress
+@swagger_auto_schema(
+    method='post',
+    manual_parameters=[
+        openapi.Parameter('images', openapi.IN_FORM, type=openapi.TYPE_FILE, description='이미지들', required=True, multiple=True),
+        openapi.Parameter('quality', openapi.IN_FORM, type=openapi.TYPE_STRING, description='압축 품질 (high/medium/low)', required=True),
+    ]
+)
+@api_view(['POST'])
+@parser_classes([MultiPartParser])
 @csrf_exempt
 def convert_image_format(request):
     if request.method == 'POST' and request.FILES.getlist('images'):
@@ -96,6 +130,16 @@ def convert_image_format(request):
 
     return JsonResponse({'error': 'Invalid request'}, status=400)
 
+# 3. Convert
+@swagger_auto_schema(
+    method='post',
+    manual_parameters=[
+        openapi.Parameter('images', openapi.IN_FORM, type=openapi.TYPE_FILE, description='이미지들 or PDF', required=True, multiple=True),
+        openapi.Parameter('format', openapi.IN_FORM, type=openapi.TYPE_STRING, description='변환 포맷 (jpg/png/webp/pdf 등)', required=True),
+    ]
+)
+@api_view(['POST'])
+@parser_classes([MultiPartParser])
 @csrf_exempt
 def compress_image(request):
     if request.method == 'POST' and request.FILES.getlist('images'):
@@ -141,7 +185,16 @@ def compress_image(request):
 
     return JsonResponse({'error': 'Invalid request'}, status=400)
 
-
+# 4. Filter
+@swagger_auto_schema(
+    method='post',
+    manual_parameters=[
+        openapi.Parameter('images', openapi.IN_FORM, type=openapi.TYPE_FILE, description='이미지들', required=True, multiple=True),
+        openapi.Parameter('filter', openapi.IN_FORM, type=openapi.TYPE_STRING, description='필터 이름 (grayscale, sepia 등)', required=True),
+    ]
+)
+@api_view(['POST'])
+@parser_classes([MultiPartParser])
 @csrf_exempt
 def apply_filter(request):
     if request.method == 'POST' and request.FILES.getlist('images'):
@@ -202,6 +255,20 @@ def apply_filter(request):
 
     return JsonResponse({'error': 'Invalid request'}, status=400)
 
+# 5. Watermark
+@swagger_auto_schema(
+    method='post',
+    manual_parameters=[
+        openapi.Parameter('images', openapi.IN_FORM, type=openapi.TYPE_FILE, description='이미지들', required=True, multiple=True),
+        openapi.Parameter('type', openapi.IN_FORM, type=openapi.TYPE_STRING, description='text 또는 image', required=True),
+        openapi.Parameter('text', openapi.IN_FORM, type=openapi.TYPE_STRING, description='텍스트 워터마크 내용'),
+        openapi.Parameter('position', openapi.IN_FORM, type=openapi.TYPE_STRING, description='위치 (center, bottom-right, top-left)', default='bottom-right'),
+        openapi.Parameter('opacity', openapi.IN_FORM, type=openapi.TYPE_INTEGER, description='불투명도 0~255'),
+        openapi.Parameter('watermark_image', openapi.IN_FORM, type=openapi.TYPE_FILE, description='워터마크 이미지 (선택)', required=False),
+    ]
+)
+@api_view(['POST'])
+@parser_classes([MultiPartParser])
 @csrf_exempt
 def add_watermark(request):
     if request.method == 'POST' and request.FILES.getlist('images'):
@@ -241,7 +308,10 @@ def add_watermark(request):
                 except:
                     font = ImageFont.load_default()
 
-                text_size = draw.textsize(text, font)
+                bbox = draw.textbbox((0, 0), text, font=font)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+                text_size = (text_width, text_height)
                 x, y = get_position(position, base_img.size, text_size)
                 draw.text((x, y), text, fill=(255, 255, 255, opacity), font=font)
 
