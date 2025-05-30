@@ -17,7 +17,8 @@ SUPPORTED_FORMATS = {
     'WEBP': 'WEBP',
     'BMP': 'BMP',
     'TIFF': 'TIFF',
-    'ICO': 'ICO'
+    'ICO': 'ICO',
+    'PDF': 'PDF',  # PDF는 이미지로 변환할 수 없음
 }
 
 
@@ -51,7 +52,11 @@ def convert_image_format(request):
     target_format = request.POST.get('format', '').upper()
 
     if not images or target_format not in SUPPORTED_FORMATS:
-        return JsonResponse({'error': '지원하지 않는 포맷이거나 파일이 없습니다.'}, status=400)
+        return JsonResponse({'error': '지원하지 않는 포맷이거나 파일이 없습니다.'}, status=400
+                            )
+    
+    if target_format == 'PDF':
+        return JsonResponse({'error': '이미지 → PDF 변환은 지원하지 않습니다.'}, status=400)
 
     ext = SUPPORTED_FORMATS[target_format]
     converted_urls = []
