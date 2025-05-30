@@ -23,6 +23,8 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/image/', include('tools.image_tools.urls')),
     path('api/pdf/', include('tools.pdf_tools.urls')),
+    path('api/convert/', include('tools.file_convert_tools.urls')), 
+
     # ✅ Swagger / ReDoc 경로 추가
     re_path(r'^swagger(?P<format>\.json|\.yaml)$',
             schema_view.without_ui(cache_timeout=0), name='schema-json'),
