@@ -1,10 +1,16 @@
+# tools/image_tools/urls.py
+
 from django.urls import path
-from .views import resize_image, convert_image_format, compress_image, apply_filter, add_watermark
+from .views.resize import resize_image
+from .views.convert import convert_image_format
+from .views.compress import compress_image
+from .views.filter import apply_filter
+from .views.watermark import add_watermark
 
 urlpatterns = [
-    path('resize/', resize_image),
-    path('convert/', convert_image_format), 
-    path('compress/', compress_image),
-    path('filter/', apply_filter),
-    path('watermark/', add_watermark),
+    path('resize/', resize_image),                  # 이미지 리사이즈
+    path('convert/', convert_image_format),         # 포맷 변환
+    path('compress/', compress_image),              # 이미지 압축
+    path('filter/', apply_filter),                  # 필터 적용
+    path('watermark/', add_watermark),              # 워터마크 삽입
 ]
